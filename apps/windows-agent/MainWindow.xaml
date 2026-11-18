@@ -1,0 +1,16 @@
+<Window x:Class="RemoteControl.Agent.MainWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="Remote Control Agent" Height="520" Width="620">
+  <StackPanel Margin="24">
+    <TextBlock Text="Remote Control Agent" FontSize="24" FontWeight="Bold" />
+    <TextBlock Text="Consent-based access for your own computer" Margin="0,8,0,20" />
+    <TextBlock x:Name="StatusText" Text="Status: disconnected" />
+    <CheckBox x:Name="AllowConnections" Content="Allow connection requests" IsChecked="True" Margin="0,16,0,8" />
+    <Button Content="Create pairing code" Click="CreatePairing_Click" Width="180" HorizontalAlignment="Left" Margin="0,8,0,8" />
+    <TextBlock Text="Pairing ID" FontWeight="SemiBold" />
+    <TextBox x:Name="PairingIdText" IsReadOnly="True" Margin="0,4,0,8" />
+    <TextBlock Text="Pairing secret (share only with your phone)" FontWeight="SemiBold" />
+    <TextBox x:Name="PairingSecretText" IsReadOnly="True" Margin="0,4,0,8" />
+    <TextBlock x:Name="ExpiryText" Text="No active pairing" Margin="0,0,0,16" />
+    <Button Content="Disconnect active session" Click="Disconnect_Click" Width="220" HorizontalAlignment="Left" />
+    <TextBlock Text="This milestone verifies pairing only. Screen sharing and keyboard input require native WebRTC/capture integration." TextWrapping="Wrap" Margin="0,20,0,0" />
+  </StackPanel>
+</Window>

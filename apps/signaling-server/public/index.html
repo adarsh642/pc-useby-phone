@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>PC Remote Control</title>
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <main>
+    <header>
+      <h1>PC Remote</h1>
+      <span id="status">Disconnected</span>
+    </header>
+    <section id="pairing">
+      <input id="pairingId" placeholder="Pairing ID" autocomplete="off">
+      <input id="secret" placeholder="Pairing secret" autocomplete="off">
+      <button id="connect">Connect</button>
+    </section>
+    <section id="session" hidden>
+      <canvas id="screen" tabindex="0"></canvas>
+      <div class="toolbar">
+        <button id="disconnect">Disconnect</button>
+        <button id="keyboardToggle" type="button">Keyboard</button>
+        <label for="file">Upload file</label>
+        <input id="file" type="file" hidden>
+      </div>
+      <div id="keyboardPanel" hidden>
+        <input id="keyboardInput" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Tap to type on the PC">
+        <div class="keyrow">
+          <button type="button" data-key="Escape">Esc</button>
+          <button type="button" data-key="Tab">Tab</button>
+          <button type="button" data-key="ArrowLeft">Left</button>
+          <button type="button" data-key="ArrowUp">Up</button>
+          <button type="button" data-key="ArrowDown">Down</button>
+          <button type="button" data-key="ArrowRight">Right</button>
+          <button type="button" data-key="Backspace">⌫</button>
+          <button type="button" data-key="Enter">Enter</button>
+        </div>
+      </div>
+    </section>
+  </main>
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>

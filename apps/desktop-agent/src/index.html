@@ -1,0 +1,39 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Remote PC Agent</title>
+  <style>
+    body { margin: 0; font-family: system-ui; background: #111827; color: #fff; }
+    main { max-width: 560px; margin: 32px auto; padding: 24px; }
+    input, button { font: inherit; }
+    input { width: 100%; box-sizing: border-box; margin: 6px 0 12px; padding: 10px; }
+    button { padding: 10px 14px; border: 0; border-radius: 6px; background: #2563eb; color: #fff; }
+    .controls { display: flex; gap: 12px; align-items: center; margin: 16px 0; }
+    #request { display: none; border: 1px solid #475569; padding: 16px; margin: 16px 0; border-radius: 8px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Remote PC Agent</h1>
+    <p id="status">Disconnected</p>
+    <div class="controls">
+      <label><input id="consent" type="checkbox" checked> Allow connection requests</label>
+    </div>
+    <button id="pairing">Create pairing code</button>
+    <p>Pairing code</p>
+    <input id="pairingId" readonly>
+    <p>Pairing secret</p>
+    <input id="secret" readonly>
+    <p id="expiry"></p>
+    <section id="request">
+      <p id="requestText"></p>
+      <button id="approve">Approve</button>
+      <button id="reject">Reject</button>
+    </section>
+    <button id="disconnect">Disconnect active session</button>
+  </main>
+  <script src="renderer.js"></script>
+</body>
+</html>

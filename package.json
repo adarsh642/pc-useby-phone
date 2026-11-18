@@ -1,0 +1,15 @@
+{
+  "name": "remote-control",
+  "private": true,
+  "workspaces": [
+    "apps/signaling-server",
+    "apps/desktop-agent"
+  ],
+  "scripts": {
+    "build": "npm run build --workspace apps/signaling-server",
+    "dev:signaling": "npm run dev --workspace apps/signaling-server",
+    "test:protocol": "tsx --test tests/protocol.test.ts",
+    "start:desktop": "npm run start --workspace apps/desktop-agent",
+    "dist:desktop": "npm run dist --workspace apps/desktop-agent"
+  }
+}

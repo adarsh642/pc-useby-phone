@@ -1,0 +1,13 @@
+services:
+  signaling:
+    build: ../apps/signaling-server
+    ports:
+      - "8787:8787"
+    environment:
+      PORT: 8787
+  coturn:
+    image: coturn/coturn:4.6
+    command: ["-n", "--log-file=stdout", "--listening-port=3478", "--lt-cred-mech"]
+    ports:
+      - "3478:3478"
+      - "3478:3478/udp"

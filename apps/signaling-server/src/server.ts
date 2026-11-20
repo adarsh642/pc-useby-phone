@@ -11,7 +11,7 @@ import {
   relayEvents
 } from "./protocol.js";
 
-const app = Fastify({ logger: { redact: ["req.headers.authorization", "secret"] } });
+const app = Fastify({ logger: { redact: ["req.headers.authorization", "secret"] }, bodyLimit: 26 * 1024 * 1024 });
 app.addContentTypeParser("application/octet-stream", { parseAs: "buffer" }, (_request, payload, done) => {
   done(null, payload);
 });

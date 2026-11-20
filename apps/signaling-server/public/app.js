@@ -10,6 +10,15 @@ const randomId = globalThis.crypto?.randomUUID?.()
   ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 const deviceId = `phone-${randomId}`;
 let keyboardText = "";
+let pingSentAt = 0;
+let pingTimer;
+let touchStart = null;
+let touchMoved = false;
+
+function setStatusLabel(text, state = "") {
+  status.textContent = text;
+  status.className = state;
+}
 
 document.querySelector("#pairingId").addEventListener("input", (event) => {
   event.target.value = event.target.value.toUpperCase().replace(/[^A-Z2-9]/g, "").slice(0, 6);
@@ -55,7 +64,11 @@ document.querySelector("#connect").addEventListener("click", async () => {
 socket.on("session.approve", () => {
   pairing.hidden = true;
   session.hidden = false;
-  status.textContent = "Connected";
+  setStatusLabel("Connected", "connected");
+  pingTimer = setInterval(() => {
+    pingSentAt = performance.now();
+    sendControl({ type: "ping", sentAt: pingSentAt });
+  }, 2000);
 });
 
 socket.on("session.reject", () => {
@@ -63,9 +76,17 @@ socket.on("session.reject", () => {
 });
 
 socket.on("session.end", () => {
+  clearInterval(pingTimer);
   pairing.hidden = false;
   session.hidden = true;
-  status.textContent = "Disconnected";
+  setStatusLabel("Disconnected");
+});
+
+socket.on("desktop.controlAck", (payload) => {
+  if (payload?.type === "ping" && pingSentAt) {
+    const latency = Math.round(performance.now() - pingSentAt);
+    setStatusLabel(`Connected • ${latency} ms`, latency > 500 ? "degraded" : "connected");
+  }
 });
 
 socket.on("desktop.frame", (payload) => {
@@ -88,6 +109,10 @@ canvas.addEventListener("pointermove", (event) => {
   if (now - lastPointerMoveSentAt < 50) return;
   lastPointerMoveSentAt = now;
   const rect = canvas.getBoundingClientRect();
+  if (touchStart) {
+    const distance = Math.hypot(event.clientX - touchStart.x, event.clientY - touchStart.y);
+    if (distance > 10) touchMoved = true;
+  }
   sendControl({
     type: "mouseMove",
     x: (event.clientX - rect.left) / rect.width,
@@ -97,6 +122,9 @@ canvas.addEventListener("pointermove", (event) => {
 
 canvas.addEventListener("pointerdown", (event) => {
   event.preventDefault();
+  touchStart = { x: event.clientX, y: event.clientY, time: performance.now() };
+  touchMoved = false;
+  if (event.pointerType === "mouse") {
   const rect = canvas.getBoundingClientRect();
   sendControl({
     type: "mouseDown",
@@ -104,11 +132,21 @@ canvas.addEventListener("pointerdown", (event) => {
     y: (event.clientY - rect.top) / rect.height,
     button: event.button === 2 ? "right" : "left"
   });
+  }
 });
 
 canvas.addEventListener("contextmenu", (event) => event.preventDefault());
 
 canvas.addEventListener("pointerup", (event) => {
+  if (touchStart) {
+    const distance = Math.hypot(event.clientX - touchStart.x, event.clientY - touchStart.y);
+    const duration = performance.now() - touchStart.time;
+    if (!touchMoved && distance < 10 && duration < 500) {
+      sendControl({ type: "mouseDown", x: (event.clientX - canvas.getBoundingClientRect().left) / canvas.getBoundingClientRect().width, y: (event.clientY - canvas.getBoundingClientRect().top) / canvas.getBoundingClientRect().height, button: "left" });
+      setTimeout(() => sendControl({ type: "mouseUp", button: "left" }), 35);
+    }
+  }
+  touchStart = null;
   sendControl({ type: "mouseUp", button: event.button === 2 ? "right" : "left" });
 });
 
@@ -138,9 +176,16 @@ document.querySelector("#keyboardInput").addEventListener("input", (event) => {
 document.querySelector("#keyboardInput").addEventListener("keydown", (event) => {
   if (event.key === "Backspace") {
     keyboardText = keyboardText.slice(0, -1);
+    sendControl({ type: "key", key: "Backspace" });
   } else if (event.key.length === 1) {
     keyboardText += event.key;
+  } else if (event.key === "Enter") {
+    sendControl({ type: "key", key: "Enter" });
   }
+});
+
+document.querySelector("#quality").addEventListener("change", (event) => {
+  sendControl({ type: "quality", quality: event.target.value });
 });
 
 document.querySelectorAll("[data-key]").forEach((button) => {

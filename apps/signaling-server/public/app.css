@@ -16,3 +16,7 @@ button, label { background: #2563eb; color: #fff; border: 0; border-radius: 8px;
 #keyboardPanel input { width: 100%; margin-bottom: 8px; }
 .keyrow { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
 .keyrow button { min-height: 44px; }
+label { display: inline-flex; align-items: center; gap: 6px; }
+select { border: 1px solid #334155; border-radius: 6px; background: #111827; color: #fff; padding: 8px; }
+header #status.connected { color: #86efac; }
+header #status.degraded { color: #fcd34d; }

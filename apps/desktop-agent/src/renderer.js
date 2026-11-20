@@ -1,5 +1,6 @@
 let captureStream = null;
 let captureTimer = null;
+let captureQuality = "balanced";
 let lastPointerSentAt = 0;
 
 const status = document.querySelector("#status");
@@ -11,6 +12,10 @@ const expiry = document.querySelector("#expiry");
 window.desktopAgent.onStatus((value) => status.textContent = value);
 window.desktopAgent.onCaptureStart(() => beginCapture().catch((error) => status.textContent = `Capture failed: ${error.message}`));
 window.desktopAgent.onCaptureStop?.(() => stopCapture());
+window.desktopAgent.onCaptureQuality?.((quality) => {
+  captureQuality = quality;
+  if (captureStream) beginCapture().catch((error) => status.textContent = `Capture failed: ${error.message}`);
+});
 window.desktopAgent.onPairing((value) => {
   pairingId.value = value.pairingId;
   secret.value = value.secret;
@@ -35,6 +40,7 @@ document.querySelector("#disconnect").addEventListener("click", () => window.des
 consent.addEventListener("change", () => window.desktopAgent.setConsent(consent.checked));
 
 async function beginCapture() {
+  stopCapture();
   const sources = await window.desktopAgent.getSources();
   const source = sources.find((item) => item.id.startsWith("screen")) ?? sources[0];
   if (!source) return;
@@ -44,9 +50,9 @@ async function beginCapture() {
       mandatory: {
         chromeMediaSource: "desktop",
         chromeMediaSourceId: source.id,
-        maxWidth: 1280,
-        maxHeight: 720,
-        maxFrameRate: 6
+        maxWidth: captureQuality === "high" ? 1920 : captureQuality === "low" ? 854 : 1280,
+        maxHeight: captureQuality === "high" ? 1080 : captureQuality === "low" ? 480 : 720,
+        maxFrameRate: captureQuality === "high" ? 8 : captureQuality === "low" ? 4 : 6
       }
     }
   });
@@ -59,12 +65,17 @@ async function beginCapture() {
   clearInterval(captureTimer);
   captureTimer = setInterval(() => {
     if (!video.videoWidth) return;
-    const scale = Math.min(1, 800 / video.videoWidth);
+    const scale = captureQuality === "high"
+      ? Math.min(1, 1200 / video.videoWidth)
+      : captureQuality === "low"
+        ? Math.min(1, 640 / video.videoWidth)
+        : Math.min(1, 800 / video.videoWidth);
     canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
     canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
     context.drawImage(video, 0, 0, canvas.width, canvas.height);
-    window.desktopAgent.frameReady(canvas.toDataURL("image/jpeg", 0.50));
-  }, 170);
+    const jpegQuality = captureQuality === "high" ? 0.65 : captureQuality === "low" ? 0.38 : 0.50;
+    window.desktopAgent.frameReady(canvas.toDataURL("image/jpeg", jpegQuality));
+  }, captureQuality === "high" ? 125 : captureQuality === "low" ? 300 : 170);
 }
 
 function stopCapture() {

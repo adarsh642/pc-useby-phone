@@ -111,6 +111,17 @@ function applyMouseControl(control) {
     const sendKey = text.replace(/[+^%~{}[\]]/g, "{$&}");
     if (sendKey) sendControl({ type: "key", sendKey });
   }
+  if (control.type === "quality") {
+    const quality = ["low", "balanced", "high"].includes(control.quality) ? control.quality : "balanced";
+    mainWindow.webContents.send("capture:quality", quality);
+  }
+  if (control.type === "ping") {
+    socket.emit("desktop.controlAck", {
+      targetDeviceId: activePhoneId,
+      type: "ping",
+      sentAt: control.sentAt
+    });
+  }
 }
 
 async function downloadFile(payload) {
@@ -175,8 +186,13 @@ app.whenReady().then(() => {
     });
   });
 
-  socket.on("desktop.control", (payload) => applyMouseControl(payload));
-  socket.on("file.available", (payload) => downloadFile(payload));
+  socket.on("desktop.control", (payload) => {
+    if (payload?.sourceDeviceId !== activePhoneId) return;
+    applyMouseControl(payload);
+  });
+  socket.on("file.available", (payload) => {
+    if (payload?.sourceDeviceId === activePhoneId) downloadFile(payload);
+  });
   socket.on("session.end", () => {
     activePhoneId = undefined;
     latestMouseMove = undefined;

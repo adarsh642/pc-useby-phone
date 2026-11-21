@@ -1,23 +1,59 @@
-const socket = io();
+const socket = io({ transports: ["websocket", "polling"] });
 const pairing = document.querySelector("#pairing");
 const session = document.querySelector("#session");
 const status = document.querySelector("#status");
 const canvas = document.querySelector("#screen");
-const context = canvas.getContext("2d");
+const context = canvas.getContext("2d", { alpha: false });
 let targetDeviceId = "";
 let lastPointerMoveSentAt = 0;
+const pointerThrottleMs = 16; // ~60fps cursor updates
 const randomId = globalThis.crypto?.randomUUID?.()
   ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 const deviceId = `phone-${randomId}`;
 let keyboardText = "";
 let pingSentAt = 0;
-let pingTimer;
 let touchStart = null;
 let touchMoved = false;
+let rttMs = 0;
+let congested = false;
+
+// Binary frame buffering (double buffer via requestAnimationFrame)
+let pendingFrame = null; // { bitmap: ImageBitmap, ts, seq }
+let lastDrawnSeq = -1;
+let rafId = null;
+let displayWidth = 0;
+let displayHeight = 0;
 
 function setStatusLabel(text, state = "") {
   status.textContent = text;
   status.className = state;
+}
+
+function scheduleRender() {
+  if (rafId) return;
+  rafId = requestAnimationFrame(() => {
+    rafId = null;
+    renderFrame();
+  });
+}
+
+function renderFrame() {
+  if (!pendingFrame) return;
+  const { bitmap, ts, seq } = pendingFrame;
+  if (seq <= lastDrawnSeq) {
+    pendingFrame = null;
+    return;
+  }
+  lastDrawnSeq = seq;
+  if (canvas.width !== bitmap.width) canvas.width = bitmap.width;
+  if (canvas.height !== bitmap.height) canvas.height = bitmap.height;
+  displayWidth = bitmap.width;
+  displayHeight = bitmap.height;
+  context.drawImage(bitmap, 0, 0);
+  if (typeof bitmap.close === "function") bitmap.close();
+  pendingFrame = null;
+  // Schedule next frame if one arrived while rendering
+  if (pendingFrame) scheduleRender();
 }
 
 document.querySelector("#pairingId").addEventListener("input", (event) => {
@@ -29,9 +65,9 @@ document.querySelector("#secret").addEventListener("input", (event) => {
 });
 
 document.querySelector("#connect").addEventListener("click", async () => {
-  const pairingId = document.querySelector("#pairingId").value.trim();
+  const pairingIdValue = document.querySelector("#pairingId").value.trim();
   const secret = document.querySelector("#secret").value.trim();
-  if (!pairingId || !secret) {
+  if (!pairingIdValue || !secret) {
     status.textContent = "Enter pairing ID and secret";
     return;
   }
@@ -40,7 +76,7 @@ document.querySelector("#connect").addEventListener("click", async () => {
     const response = await fetch("/pairing/join", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ pairingId, secret, deviceId, deviceName: "Phone browser" })
+      body: JSON.stringify({ pairingId: pairingIdValue, secret, deviceId, deviceName: "Phone browser" })
     });
     const body = await response.json();
     if (!response.ok) throw new Error(body.error);
@@ -54,7 +90,7 @@ document.querySelector("#connect").addEventListener("click", async () => {
         status.textContent = "Device authentication failed";
         return;
       }
-      socket.emit("session.request", { targetDeviceId, pairingId });
+      socket.emit("session.request", { targetDeviceId, pairingId: pairingIdValue });
     });
   } catch (error) {
     status.textContent = `Connection failed: ${error.message}`;
@@ -65,11 +101,15 @@ socket.on("session.approve", () => {
   pairing.hidden = true;
   session.hidden = false;
   setStatusLabel("Connected", "connected");
+  pingSentAt = performance.now();
+  socket.emit("desktop.control", { type: "ping", targetDeviceId, sentAt: pingSentAt });
   pingTimer = setInterval(() => {
     pingSentAt = performance.now();
-    sendControl({ type: "ping", sentAt: pingSentAt });
-  }, 2000);
+    socket.emit("desktop.control", { type: "ping", targetDeviceId, sentAt: pingSentAt });
+  }, 1000);
 });
+
+let pingTimer;
 
 socket.on("session.reject", () => {
   status.textContent = "Windows PC rejected the connection";
@@ -77,6 +117,11 @@ socket.on("session.reject", () => {
 
 socket.on("session.end", () => {
   clearInterval(pingTimer);
+  cancelAnimationFrame(rafId);
+  rafId = null;
+  pendingFrame = null;
+  lastDrawnSeq = -1;
+  context.clearRect(0, 0, canvas.width, canvas.height);
   pairing.hidden = false;
   session.hidden = true;
   setStatusLabel("Disconnected");
@@ -85,55 +130,74 @@ socket.on("session.end", () => {
 socket.on("desktop.controlAck", (payload) => {
   if (payload?.type === "ping" && pingSentAt) {
     const latency = Math.round(performance.now() - pingSentAt);
+    rttMs = latency;
     setStatusLabel(`Connected • ${latency} ms`, latency > 500 ? "degraded" : "connected");
+    // Report congestion back to desktop so it can throttle
+    const nowCongested = latency > 300;
+    if (nowCongested !== congested) {
+      congested = nowCongested;
+      socket.emit("desktop.congestion", { targetDeviceId, congested });
+    }
+    // Tell desktop our measured RTT for adaptive quality
+    socket.emit("desktop.rtt", { targetDeviceId, rttMs: latency });
   }
 });
 
-socket.on("desktop.frame", (payload) => {
-  if (!payload?.image) return;
-  const image = new Image();
-  image.onload = () => {
-    if (canvas.width !== image.width) canvas.width = image.width;
-    if (canvas.height !== image.height) canvas.height = image.height;
-    context.drawImage(image, 0, 0);
-  };
-  image.src = payload.image;
+socket.on("desktop.frame", (metadata, buffer) => {
+  if (!buffer) return;
+  const arrayBuffer = buffer instanceof ArrayBuffer ? buffer : buffer.buffer;
+  try {
+    const blob = new Blob([arrayBuffer], { type: "image/jpeg" });
+    createImageBitmap(blob).then((bitmap) => {
+      pendingFrame = { bitmap, ts: metadata?.ts ?? Date.now(), seq: metadata?.seq ?? 0 };
+      scheduleRender();
+    }).catch(() => {
+      // Fallback: decode via Image
+      const image = new Image();
+      image.onload = () => {
+        pendingFrame = { bitmap: image, ts: metadata?.ts ?? Date.now(), seq: metadata?.seq ?? 0 };
+        scheduleRender();
+      };
+      image.src = URL.createObjectURL(blob);
+    });
+  } catch {
+    // ignore undecodable frame
+  }
 });
 
 function sendControl(control) {
   if (targetDeviceId) socket.emit("desktop.control", { ...control, targetDeviceId });
 }
 
+function canvasRect() {
+  return canvas.getBoundingClientRect();
+}
+
+function normalizedCoords(event) {
+  const rect = canvasRect();
+  return {
+    x: Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)),
+    y: Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height))
+  };
+}
+
 canvas.addEventListener("pointermove", (event) => {
   const now = performance.now();
-  if (now - lastPointerMoveSentAt < 50) return;
+  if (now - lastPointerMoveSentAt < pointerThrottleMs) return;
   lastPointerMoveSentAt = now;
-  const rect = canvas.getBoundingClientRect();
-  if (touchStart) {
-    const distance = Math.hypot(event.clientX - touchStart.x, event.clientY - touchStart.y);
-    if (distance > 10) touchMoved = true;
-  }
-  sendControl({
-    type: "mouseMove",
-    x: (event.clientX - rect.left) / rect.width,
-    y: (event.clientY - rect.top) / rect.height
-  });
-});
+  const { x, y } = normalizedCoords(event);
+  sendControl({ type: "mouseMove", x, y });
+}, { passive: false });
 
 canvas.addEventListener("pointerdown", (event) => {
   event.preventDefault();
   touchStart = { x: event.clientX, y: event.clientY, time: performance.now() };
   touchMoved = false;
   if (event.pointerType === "mouse") {
-  const rect = canvas.getBoundingClientRect();
-  sendControl({
-    type: "mouseDown",
-    x: (event.clientX - rect.left) / rect.width,
-    y: (event.clientY - rect.top) / rect.height,
-    button: event.button === 2 ? "right" : "left"
-  });
+    const { x, y } = normalizedCoords(event);
+    sendControl({ type: "mouseDown", x, y, button: event.button === 2 ? "right" : "left" });
   }
-});
+}, { passive: false });
 
 canvas.addEventListener("contextmenu", (event) => event.preventDefault());
 
@@ -142,13 +206,22 @@ canvas.addEventListener("pointerup", (event) => {
     const distance = Math.hypot(event.clientX - touchStart.x, event.clientY - touchStart.y);
     const duration = performance.now() - touchStart.time;
     if (!touchMoved && distance < 10 && duration < 500) {
-      sendControl({ type: "mouseDown", x: (event.clientX - canvas.getBoundingClientRect().left) / canvas.getBoundingClientRect().width, y: (event.clientY - canvas.getBoundingClientRect().top) / canvas.getBoundingClientRect().height, button: "left" });
+      const { x, y } = normalizedCoords(event);
+      sendControl({ type: "mouseDown", x, y, button: "left" });
       setTimeout(() => sendControl({ type: "mouseUp", button: "left" }), 35);
     }
   }
   touchStart = null;
+  const { x, y } = normalizedCoords(event);
   sendControl({ type: "mouseUp", button: event.button === 2 ? "right" : "left" });
-});
+}, { passive: false });
+
+canvas.addEventListener("touchmove", (event) => {
+  if (touchStart) {
+    const distance = Math.hypot(event.touches[0].clientX - touchStart.x, event.touches[0].clientY - touchStart.y);
+    if (distance > 10) touchMoved = true;
+  }
+}, { passive: false });
 
 document.querySelector("#disconnect").addEventListener("click", () => {
   socket.emit("session.end", { targetDeviceId });

@@ -6,8 +6,16 @@ authentication after local confirmation.
 
 Socket events are `auth.device`, `presence.update`, `session.request`,
 `session.approve`, `session.reject`, `webrtc.offer`, `webrtc.answer`,
-`webrtc.iceCandidate`, and `session.end`. Every relay includes `sourceDeviceId` and
-targets a specific authenticated device.
+`webrtc.iceCandidate`, `session.end`, `desktop.frame`, `desktop.control`,
+`desktop.controlAck`, `desktop.rtt`, and `desktop.congestion`. Every relay includes
+`sourceDeviceId` and targets a specific authenticated device.
+
+`desktop.frame` is a binary event: `(metadata: FrameMetadata, buffer: ArrayBuffer)`
+where `buffer` is a JPEG-encoded screen capture. `FrameMetadata` includes
+`targetDeviceId`, `quality`, `width`, `height`, `ts`, and `seq`.
+
+`desktop.rtt` and `desktop.congestion` carry round-trip-time and receiver
+congestion signals used for adaptive quality and backpressure.
 
 Keyboard DataChannel messages:
 

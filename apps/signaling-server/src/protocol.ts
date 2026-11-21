@@ -35,5 +35,17 @@ export const relayEvents = [
   "desktop.frame",
   "desktop.control",
   "desktop.controlAck",
+  "desktop.rtt",
+  "desktop.congestion",
   "file.available"
 ] as const;
+
+export type FrameMetadata = {
+  targetDeviceId?: string;
+  quality?: "low" | "balanced" | "high";
+  width?: number;
+  height?: number;
+  ts?: number;
+  seq?: number;
+  [key: string]: unknown;
+};

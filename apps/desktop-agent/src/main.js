@@ -15,6 +15,9 @@ let consentEnabled = true;
 let latestMouseMove;
 let mouseMoveTimer;
 let controlProcess;
+let rttMs = 0;
+let lastPingSentAt = 0;
+let congestionBackoff = 1; // multiplier on capture interval
 
 function setStatus(value) {
   mainWindow?.webContents.send("status", value);
@@ -108,7 +111,13 @@ function applyMouseControl(control) {
   }
   if (control.type === "text") {
     const text = String(control.text ?? "").slice(0, 2048);
-    const sendKey = text.replace(/[+^%~{}[\]]/g, "{$&}");
+    const sendKey = text
+      .replace(/\r\n|\r|\n/g, "{ENTER}")
+      .replace(/[+^%~{}[\]]/g, (character) => {
+        if (character === "{") return "{{}";
+        if (character === "}") return "{}}";
+        return `{${character}}`;
+      });
     if (sendKey) sendControl({ type: "key", sendKey });
   }
   if (control.type === "quality") {
@@ -116,12 +125,26 @@ function applyMouseControl(control) {
     mainWindow.webContents.send("capture:quality", quality);
   }
   if (control.type === "ping") {
+    lastPingSentAt = control.sentAt;
     socket.emit("desktop.controlAck", {
       targetDeviceId: activePhoneId,
       type: "ping",
       sentAt: control.sentAt
     });
   }
+  if (control.type === "rtt") {
+    rttMs = control.rttMs ?? 0;
+    mainWindow.webContents.send("capture:rtt", rttMs);
+  }
+}
+
+function adaptQualityFromRtt() {
+  // Tell the renderer to adjust capture framerate based on measured RTT
+  let interval;
+  if (rttMs > 250) interval = "low";
+  else if (rttMs > 120) interval = "balanced";
+  else interval = "high";
+  mainWindow.webContents.send("capture:quality", interval);
 }
 
 async function downloadFile(payload) {
@@ -153,15 +176,25 @@ function createWindow() {
   mainWindow.on("closed", () => app.quit());
 }
 
+app.on("before-quit", () => {
+  clearInterval(mouseMoveTimer);
+  if (controlProcess) {
+    controlProcess.stdin?.end();
+    controlProcess.kill();
+  }
+  if (socket) socket.close();
+});
+
 app.whenReady().then(() => {
   createWindow();
   socket = io(serverUrl, { transports: ["websocket", "polling"] });
+  // Faster mouse flush: 16ms (~60fps cursor)
   mouseMoveTimer = setInterval(() => {
     if (!latestMouseMove || !activePhoneId) return;
     const { x, y } = latestMouseMove;
     latestMouseMove = undefined;
     sendControl({ type: "mouseMove", x, y });
-  }, 50);
+  }, 16);
 
   socket.on("connect", () => {
     socket.emit("auth.device", {
@@ -190,9 +223,30 @@ app.whenReady().then(() => {
     if (payload?.sourceDeviceId !== activePhoneId) return;
     applyMouseControl(payload);
   });
+
   socket.on("file.available", (payload) => {
     if (payload?.sourceDeviceId === activePhoneId) downloadFile(payload);
   });
+
+  socket.on("desktop.rtt", (payload) => {
+    if (payload?.sourceDeviceId !== activePhoneId) return;
+    const now = Date.now();
+    const rtt = now - (payload.sentAt || now);
+    rttMs = rtt;
+    adaptQualityFromRtt();
+    socket.emit("desktop.controlAck", {
+      targetDeviceId: activePhoneId,
+      type: "ping",
+      sentAt: payload.sentAt
+    });
+  });
+
+  socket.on("desktop.congestion", (payload) => {
+    if (payload?.sourceDeviceId !== activePhoneId) return;
+    congestionBackoff = payload.congested ? 2 : 1;
+    mainWindow.webContents.send("capture:congestion", congestionBackoff);
+  });
+
   socket.on("session.end", () => {
     activePhoneId = undefined;
     latestMouseMove = undefined;
@@ -226,7 +280,16 @@ app.whenReady().then(() => {
     const sources = await desktopCapturer.getSources({ types: ["screen"], thumbnailSize: { width: 1, height: 1 } });
     return sources.map((source) => ({ id: source.id, name: source.name }));
   });
-  ipcMain.on("capture:frame", (_event, image) => {
-    if (activePhoneId) socket.emit("desktop.frame", { targetDeviceId: activePhoneId, image });
+  // Receive binary frame (ArrayBuffer + metadata) from renderer, relay as binary
+  ipcMain.on("capture:frame", (_event, image, metadata) => {
+    if (!activePhoneId) return;
+    const frame = {
+      ...metadata,
+      targetDeviceId: activePhoneId,
+      sourceDeviceId: deviceId,
+      rttMs,
+      congestion: congestionBackoff > 1
+    };
+    socket.emit("desktop.frame", frame, image);
   });
 });

@@ -67,3 +67,22 @@ Keyboard injection and screen viewing are implemented over the signaling relay.
 Direct WebRTC peer-to-peer video/DataChannel is not implemented yet. Do not treat
 a successful pairing as a fully optimized remote-control session until WebRTC is
 added.
+
+## Troubleshooting
+
+**Laptop display blinks/flickers after pairing**
+
+Cause: approving a pairing starts desktop screen capture (`getUserMedia` with `chromeMediaSource: "desktop"`). On many Windows laptops — especially hybrid/dual-GPU systems — continuous Desktop Duplication capture stresses the display driver and makes the primary screen flicker.
+
+Mitigation:
+- Keep the Windows agent window off the primary/captured screen or minimize it while in a session.
+- On the phone, choose **"Fast" (low)** quality instead of Balanced/Sharp. Lower resolution + lower frame rate reduces display-driver load.
+- Capture stops automatically when you disconnect or hide the agent window.
+
+**High / growing latency**
+
+Cause: frames were captured and pushed without regard for how fast the network/phone could consume them. If the relay or phone fell behind, frames piled up in a backlog and latency kept climbing.
+
+Fix (in this change): the desktop now uses **backpressure-aware frame dropping**. It only captures the next frame after the previous one has been handed to the signaling relay and acknowledged. If the previous frame is still in flight, the new frame is dropped instead of queued, so the phone always receives the latest frame and latency stays bounded. JPEG quality was also reduced slightly (Balanced 0.55 → 0.50, Low 0.40 → 0.35) and the Balanced desktop-duplication frame-rate hint lowered (15 → 10 fps) to shrink each frame and reduce capture load.
+
+Note: frames still route through the signaling server (laptop → server → phone). Direct WebRTC peer-to-peer is not yet implemented, so some relay latency is unavoidable until that phase lands.

@@ -19,8 +19,8 @@ test("enforces pairing and device identity constraints", () => {
   assert.equal(pairingCreateSchema.safeParse({ deviceId: "windows-device-1234", deviceName: "PC" }).success, true);
   assert.equal(pairingCreateSchema.safeParse({ deviceId: "short", deviceName: "PC" }).success, false);
   assert.equal(pairingJoinSchema.safeParse({
-    pairingId: "ABCD23",
-    secret: "Abcd123456",
+    pairingId: "ABC23",
+    secret: "Abcd1234",
     deviceId: "android-device-1234",
     deviceName: "Phone"
   }).success, true);

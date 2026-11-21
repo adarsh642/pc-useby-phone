@@ -5,6 +5,8 @@ let isPaused = false;
 let frameSeq = 0;
 let lastFrameTs = 0;
 let minIntervalMs = 160; // balanced default (~6 fps)
+let awaitingAck = false; // true while a captured frame is in flight to the phone
+let captureRaf = null; // requestAnimationFrame id for the capture loop
 
 const status = document.querySelector("#status");
 const consent = document.querySelector("#consent");
@@ -18,7 +20,11 @@ window.desktopAgent.onCaptureStop?.(() => stopCapture());
 window.desktopAgent.onCaptureQuality?.((quality) => {
   captureQuality = quality;
   minIntervalMs = quality === "high" ? 60 : quality === "low" ? 250 : 160;
+  awaitingAck = false;
   if (captureStream) restartCapture();
+});
+window.desktopAgent.onFrameAck?.(() => {
+  awaitingAck = false;
 });
 window.desktopAgent.onPairing((value) => {
   pairingId.value = value.pairingId;
@@ -56,7 +62,7 @@ async function beginCapture() {
         chromeMediaSourceId: source.id,
         maxWidth: captureQuality === "high" ? 1920 : captureQuality === "low" ? 854 : 1280,
         maxHeight: captureQuality === "high" ? 1080 : captureQuality === "low" ? 480 : 720,
-        maxFrameRate: captureQuality === "high" ? 30 : captureQuality === "low" ? 8 : 15
+        maxFrameRate: captureQuality === "high" ? 30 : captureQuality === "low" ? 8 : 10
       }
     }
   });
@@ -68,14 +74,27 @@ async function beginCapture() {
   const context = canvas.getContext("2d", { willReadFrequently: true });
   let nextTick = 0;
 
+  function scheduleCapture() {
+    if (isPaused) return;
+    cancelAnimationFrame(captureRaf);
+    captureRaf = requestAnimationFrame(tick);
+  }
+
   function tick() {
-    if (isPaused || !video.videoWidth) {
-      if (!isPaused) captureTimer = setTimeout(tick, 50);
+    captureRaf = null;
+    if (isPaused) return;
+    if (!video.videoWidth) {
+      scheduleCapture();
       return;
     }
     const now = performance.now();
     if (now < nextTick) {
-      captureTimer = setTimeout(tick, nextTick - now);
+      scheduleCapture();
+      return;
+    }
+    if (awaitingAck) {
+      // Previous frame still in flight: drop this frame so latency cannot build up
+      scheduleCapture();
       return;
     }
     const scale = captureQuality === "high"
@@ -86,11 +105,11 @@ async function beginCapture() {
     canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
     canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
     context.drawImage(video, 0, 0, canvas.width, canvas.height);
-    const jpegQuality = captureQuality === "high" ? 0.70 : captureQuality === "low" ? 0.40 : 0.55;
+    const jpegQuality = captureQuality === "high" ? 0.70 : captureQuality === "low" ? 0.35 : 0.50;
     canvas.toBlob((blob) => {
       if (!blob) {
         nextTick = performance.now() + minIntervalMs;
-        captureTimer = setTimeout(tick, minIntervalMs);
+        scheduleCapture();
         return;
       }
       lastFrameTs = performance.now();
@@ -99,10 +118,11 @@ async function beginCapture() {
         const arrayBuffer = abReader.result;
         if (!(arrayBuffer instanceof ArrayBuffer)) {
           nextTick = performance.now() + minIntervalMs;
-          captureTimer = setTimeout(tick, minIntervalMs);
+          scheduleCapture();
           return;
         }
         frameSeq += 1;
+        awaitingAck = true;
         window.desktopAgent.frameReady(arrayBuffer, {
           quality: captureQuality,
           width: canvas.width,
@@ -111,13 +131,13 @@ async function beginCapture() {
           seq: frameSeq
         });
         nextTick = performance.now() + minIntervalMs;
-        captureTimer = setTimeout(tick, minIntervalMs);
+        scheduleCapture();
       };
       abReader.readAsArrayBuffer(blob);
     }, "image/jpeg", jpegQuality);
   }
   nextTick = performance.now();
-  captureTimer = setTimeout(tick, 0);
+  scheduleCapture();
 }
 
 function restartCapture() {
@@ -128,8 +148,11 @@ function restartCapture() {
 
 function stopCapture() {
   isPaused = true;
+  awaitingAck = false;
   clearTimeout(captureTimer);
   captureTimer = null;
+  cancelAnimationFrame(captureRaf);
+  captureRaf = null;
   captureStream?.getTracks().forEach((track) => track.stop());
   captureStream = null;
   isPaused = false;

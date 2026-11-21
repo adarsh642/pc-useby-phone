@@ -20,7 +20,9 @@ let lastPingSentAt = 0;
 let congestionBackoff = 1; // multiplier on capture interval
 
 function setStatus(value) {
-  mainWindow?.webContents.send("status", value);
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send("status", value);
+  }
 }
 
 function startControlProcess() {
@@ -173,7 +175,10 @@ function createWindow() {
     }
   });
   mainWindow.loadFile(path.join(__dirname, "index.html"));
-  mainWindow.on("closed", () => app.quit());
+  mainWindow.on("closed", () => {
+    mainWindow = null;
+    app.quit();
+  });
 }
 
 app.on("before-quit", () => {
@@ -290,6 +295,9 @@ app.whenReady().then(() => {
       rttMs,
       congestion: congestionBackoff > 1
     };
-    socket.emit("desktop.frame", frame, image);
+    socket.emit("desktop.frame", frame, image, () => {
+      // Tell the renderer the frame is in flight so it can capture the next one
+      mainWindow.webContents.send("capture:frame-ack");
+    });
   });
 });

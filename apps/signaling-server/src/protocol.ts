@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 export const deviceId = z.string().min(16).max(128);
-export const pairingId = z.string().trim().regex(/^[A-Z2-9]{6}$/);
+export const pairingId = z.string().trim().regex(/^[A-Z2-9]{5}$/);
 
 export const pairingCreateSchema = z.object({
   deviceId,
@@ -10,7 +10,7 @@ export const pairingCreateSchema = z.object({
 
 export const pairingJoinSchema = z.object({
   pairingId,
-  secret: z.string().trim().regex(/^[A-Za-z0-9_-]{10,16}$/),
+  secret: z.string().trim().regex(/^[A-Za-z0-9_-]{8,16}$/),
   deviceId,
   deviceName: z.string().trim().min(1).max(80)
 });

@@ -15,5 +15,6 @@ contextBridge.exposeInMainWorld("desktopAgent", {
   onCaptureStart: (callback) => ipcRenderer.on("capture:start", () => callback()),
   onCaptureStop: (callback) => ipcRenderer.on("capture:stop", () => callback()),
   onCaptureQuality: (callback) => ipcRenderer.on("capture:quality", (_event, value) => callback(value)),
+  onFrameAck: (callback) => ipcRenderer.on("capture:frame-ack", () => callback()),
   frameReady: (image, metadata) => ipcRenderer.send("capture:frame", image, metadata, [image])
 });

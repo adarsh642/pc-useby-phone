@@ -57,7 +57,7 @@ function renderFrame() {
 }
 
 document.querySelector("#pairingId").addEventListener("input", (event) => {
-  event.target.value = event.target.value.toUpperCase().replace(/[^A-Z2-9]/g, "").slice(0, 6);
+  event.target.value = event.target.value.toUpperCase().replace(/[^A-Z2-9]/g, "").slice(0, 5);
 });
 
 document.querySelector("#secret").addEventListener("input", (event) => {
@@ -224,7 +224,21 @@ canvas.addEventListener("touchmove", (event) => {
 }, { passive: false });
 
 document.querySelector("#disconnect").addEventListener("click", () => {
-  socket.emit("session.end", { targetDeviceId });
+  const myTarget = targetDeviceId;
+  // Reset local UI immediately so the screen does not stay stuck on the last frame
+  clearInterval(pingTimer);
+  pingTimer = null;
+  cancelAnimationFrame(rafId);
+  rafId = null;
+  pendingFrame = null;
+  lastDrawnSeq = -1;
+  context.clearRect(0, 0, canvas.width, canvas.height);
+  pairing.hidden = false;
+  session.hidden = true;
+  targetDeviceId = "";
+  setStatusLabel("Disconnected");
+  // Ask the server to end the session and stop the desktop capture
+  socket.emit("session.end", { targetDeviceId: myTarget });
 });
 
 document.querySelector("#keyboardToggle").addEventListener("click", () => {

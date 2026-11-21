@@ -88,9 +88,9 @@ app.post("/pairing/create", async (request, reply) => {
   let id: string;
   do {
     const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-    id = Array.from({ length: 6 }, () => alphabet[randomBytes(1)[0] % alphabet.length]).join("");
+    id = Array.from({ length: 5 }, () => alphabet[randomBytes(1)[0] % alphabet.length]).join("");
   } while ([...pairings.keys()].includes(id));
-  const secret = randomBytes(8).toString("base64url");
+  const secret = randomBytes(6).toString("base64url");
   const expiresAt = Date.now() + pairingTtlMs;
   pairings.set(id, {
     secretDigest: digest(secret),
